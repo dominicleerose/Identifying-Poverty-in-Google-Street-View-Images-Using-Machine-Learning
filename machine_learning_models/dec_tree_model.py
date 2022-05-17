@@ -76,7 +76,7 @@ xtrain, xtest, ytrain, ytest = train_test_split(features, labels, test_size = 0.
 
 # Create decision tree model 
 
-model = DecisionTreeClassifier(criterion = "entropy", random_state = 100, max_depth = 3, min_samples_leaf = 5)
+model = DecisionTreeClassifier(criterion = "entropy", random_state = 100, max_depth = 320, min_samples_leaf = 5)
 model.fit(xtrain, ytrain) # Fit the model
 
 # Save data

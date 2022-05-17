@@ -1,0 +1,448 @@
+---
+title: "Street_View_Static_API_Methodology"
+author: "40544"
+date: "05/05/2021"
+output: pdf_document
+---
+
+**1. Outline**
+
+This file outlines the methodology employed to collect Google Street View (GSV) images (here, 40 per square mile) from four Southeast Asian cities - a project that I worked on as a Social Data Science master's student at the London School of Economics.
+
+The method can be adapted to suit the needs of future researchers aiming to collect multiple images from multiple areas within countries that benefit from good GSV coverage.
+
+Note: private information such as the `api_key` and `signature` have been removed.
+
+**2. Motivation for Publishing Script**
+
+Many papers utilise GSV to collect images from cities (e.g. Naik et al., 2014; Glaeser et al., 2018), though none (to the best of my knowledge) publicise the code that they used to query the Street View Static API to return the images. Collaborative websites such as GitHub and Stack Overflow also lack resources to achieve this, particularly in R.
+
+The API viewport is defined with a URL that requires a `location` parameter, i.e. latitude and longitude coordinates (or a text string). However, there is no option to return multiple images per square mile within defined boundaries of a city. 
+
+Hence, this guide presents one method for doing so.
+
+*References*
+Naik et al. (2014): https://ieeexplore.ieee.org/document/6910072
+Glaeser et al. (2018): https://onlinelibrary.wiley.com/doi/full/10.1111/ecin.12364
+
+**3. Defining City Boundaries**
+
+Typing a city (e.g. Bangkok, Thailand) into Google Maps will return the urban area with a red boundary. Right-clicking on a point within the map will reveal the lat/lng coordinates.
+
+```{r}
+knitr::include_graphics('Bangkok.png')
+
+```
+
+After visualising the city's boundaries, it is possible to draw a segment that suits the researcher's needs. From https://www.google.co.uk/maps, select 'Menu' -> 'Your places' -> 'MAPS' -> 'CREATE MAP'. Below is an example of a square selection of Bangkok created by specifying four lat/lng pairs and measuring the distances between them. 
+
+```{r}
+knitr::include_graphics('Bangkok_Selection.png')
+
+```
+
+The difference between the boundaries of the two images can be reduced with greater precision when plotting them in the latter. However, the API currently charges 0.007 USD per image, which means funding constraints (in my case) motivated a slight scaling down of Bangkok and its surrounding areas (from 1,569 sq km to 1,292 sq km).
+
+**4. Determining X Images per Square Mile and Coordinates Within Square Mile**
+
+The image below is a sample of one square mile (2.58 square kilometers) from Bangkok. The LHS shows the four coordinate pairs of the corners of this square.
+
+```{r}
+knitr::include_graphics('Bangkok_Sample.png')
+
+```
+
+Suppose the intention is to capture X images per square mile (40 in my case). X/2 is the number of lines that are plotted from north-south and east-west. For instance, 40/2 = 20, hence 20 lines are plotted north-south and 20 plotted from east-west:
+
+```{r}
+knitr::include_graphics('Bangkok_Grid_Drawing.jpg')
+
+```
+
+Now, we want to calculate the lat/lng coordinates between the extreme points in 20 equal spaces. 
+
+```{r}
+# Calculate 20 equally distanced latitude coordinates between 13.78971 and 13.80414
+
+lat_example <- as.data.frame(seq(13.78971, 13.80414, 
+                                 length.out = 20))
+
+colnames(lat_example) <- 'Lat' # Rename column
+
+# Calculate 20 equally distanced longitude coordinates between 100.3278 and 100.34256
+
+lng_example <- as.data.frame(seq(100.3278, 100.34256, 
+                   length.out = 20))
+
+colnames(lng_example) <- 'Lng' # Rename column
+
+# Create vectors of fixed coordinates for lat = 13.80414 and lng = 100.3278 
+
+vector_lat <- as.data.frame(rep(13.80414, length.out = 20))
+
+colnames(vector_lat) <- 'Fixed Lat'
+
+vector_lng <- as.data.frame(rep(100.3278, length.out = 20))
+
+colnames(vector_lng) <- 'Fixed Lng'
+
+# Create combined data frames
+
+df <- cbind(lat_example, vector_lng)
+
+df2 <- cbind(vector_lat, lng_example)
+
+# Create vectors of fixed coordinates for lat = 13.78971 and lng = 100.34265
+
+vector_lat2 <- as.data.frame(rep(13.78971, length.out = 20))
+
+colnames(vector_lat2) <- 'Fixed Lat'
+
+vector_lng2 <- as.data.frame(rep(100.34265, length.out = 20))
+
+colnames(vector_lng2) <- 'Fixed Lng'
+
+# Create combined data frames
+
+df3 <- cbind(lat_example, vector_lng2)
+
+df4 <- cbind(vector_lat2, lng_example)
+
+head(df, 5) # Preview of df
+
+```
+
+Plotting the coordinate pairs from `df`, `df2`, `df3` and `df4` on a website such as https://mobisoftinfotech.com/tools/plot-multiple-points-on-map/ shows the perimeter of the square mile in 20 equal spaces from north-south and east-west:
+
+```{r}
+knitr::include_graphics('Bangkok_Multiple_Coordinates.png')
+
+```
+
+Now that the perimeter of the square mile is visualised, we can imagine the horizontal and vertical lines from the grid drawing connecting the corresponding pins/points. Along a single vertical line (longitude) within a square mile, I intend to retrieve a single random latitude point between two extreme point latitudes. In the example above, along the longitude 100.3278 (far left), the two latitude extreme points are 13.80414 (north) and 13.78971 (south). The code below returns 20 randomly selected latitudes between these extremes and adapts the process so that 20 randomly selected longitudes between the extreme longitude points (100.34265 and 100.3278) are also retrieved.
+
+```{r}
+# Create data frame which contains longitude values within a square mile separated by 20 equal steps (i.e. 'Lng' column in df2)
+
+df5 <- df2['Lng']
+
+# Select minimum and maximum 'Lat' values in df, then output 20 randomly selected latitudes (across a uniform distribution) between these values. Assign these values to 'Lat' column in df5.
+
+df5['Lat'] <- runif(20, min = min(df$Lat), max = max(df$Lat))
+
+head(df5, 5) # Preview
+
+# Create a data frame which contains latitude values within a square mile separated by 20 equal steps (i.e. 'Lat' column in df)
+
+df6 <- df['Lat']
+
+# Select minimum and maximum 'Lng' values in df2, then output 20 randomly selected longitudes (across a uniform distribution) between these values. Assign these values to 'Lng' column in df6.
+
+df6['Lng'] <- runif(20, min = min(df2$Lng), max = max(df2$Lng))
+
+head(df6, 5) # Preview
+
+# Combine df5 and df6, assign to df7
+
+suppressMessages(library(dplyr))
+
+df7 <- bind_rows(df5, df6)
+
+# write.csv(df7, 'df7.csv') # Save coordinates
+
+```
+
+Plotting coordinate pairs from `df7` using `sp` and `leaflet` packages shows 40 pins within a square mile boundary. 
+
+```{r}
+suppressMessages(library(sp))
+suppressMessages(library(leaflet))
+
+df7_csv <- read.csv('df7.csv', header = TRUE) # Load coordinates
+
+# Plot coordinates on map
+
+coordinates(df7_csv) <- ~Lng + Lat
+leaflet(df7_csv) %>% 
+  addMarkers() %>% 
+  addTiles()
+ 
+```
+
+**5. Adapting Methodology to Determine Coordinates Across City**
+
+Now that we have 40 lat/lng pairs within one square mile, we need to adapt this methodology to retrieve 40 coordinate pairs within each square mile of the city boundary defined earlier. In the context of Bangkok, I will use the boundary defined earlier, comprised of 1,292 square kilometres (~499 square miles). 
+
+```{r}
+# There are 32.3 kilometres (~20 miles) between the extreme latitude points (13.80414 and 13.51418) and 40.1 kilometres (~25 miles) between the extreme longitude points (100.6979 and 100.3278) in the Bangkok boundary. 20 miles / 25 miles indicates that there should be 0.8 latitudes for every longitude. Hence, to get 20,000 images (500 square miles * 40 images), we need 100,000 / 9 longitudes and 80,000 / 9 latitudes (where (80,000 / 9) / (100,000 / 9) = 0.8).
+
+# The code below calculates 80,000 / 9 equally separated latitudes between the latitude extreme points.
+
+lat_bangkok <- as.data.frame(seq(13.51418, 13.80414, 
+                                 length.out = 80000 / 9))
+
+colnames(lat_bangkok) <- 'Lat' # Rename column
+
+# The code below calculates 100,000 / 9 equally separated longitudes between the longitude extreme points.
+
+lng_bangkok <- as.data.frame(seq(100.3278, 100.6979, 
+                                 length.out = 100000 / 9))
+
+colnames(lng_bangkok) <- 'Lng' # Rename column
+
+# Select minimum and maximum 'Lng' values in lng_bangkok, then output 80000 / 9 (~8889) randomly selected longitudes (across a uniform distribution) between these values. Assign these values to 'Lng' column in lat_bangkok.
+
+lat_bangkok['Lng'] <- runif(8889, min = min(lng_bangkok$Lng), max = max(lng_bangkok$Lng))
+
+# Select minimum and maximum 'Lat' values in lat_bangkok, then output 100000 / 9 (~11112) randomly selected latitudes (across a uniform distribution) between these values. Assign these values to 'Lat' column in lng_bangkok.
+
+lng_bangkok['Lat'] <- runif(11112, min = min(lat_bangkok$Lat), max = max(lat_bangkok$Lat))
+
+# Combine lat_bangkok and lng_bangkok
+
+bangkok_coordinates <- bind_rows(lat_bangkok, lng_bangkok)
+
+# write.csv(bangkok_coordinates, 'bangkok_coordinates.csv', 
+#           row.names = FALSE) # Save coordinates
+
+# Show coordinates on a map (commented out to avoid computation intensity)
+
+# coordinates(bangkok_coordinates) <- ~Lng + Lat
+# leaflet(bangkok_coordinates) %>% 
+#   addMarkers() %>% 
+#   addTiles()
+
+```
+
+**6. Collecting GSV Images from Bangkok**
+
+The `googleway` package allows us to interact with the Street View Static API. An API key is required, which can be enabled through the Google Maps Platform. It has been omitted here to maintain privacy. 
+
+`map2` from the `purrr` package enables each coordinate pair from `bangkok_coordinates` to query the API, where `my_function` details the desired specifications of the images (such as size). `response_check = TRUE` means that only coordinates which are associated with an image will be used, which avoids unnecessary downloading of blank images.
+
+```{r}
+# install.packages('googleway')
+
+suppressMessages(suppressWarnings(library(googleway)))
+suppressMessages(library(purrr))
+
+bangkok_coordinates <- read.csv('bangkok_coordinates.csv', 
+                                header = TRUE)
+
+# api_key <- 'enter'
+# 
+# my_function <- function(Lat, Lng){
+#   google_streetview(
+#   location = c(Lat, Lng), # lat/lng coordinates
+#   size = c(8000, 5333), # w x h
+#   heading = 0, # north facing camera
+#   pitch = 0, # camera angle
+#   output = 'plot',
+#   response_check = TRUE,
+#   key = api_key
+# )
+# }
+
+# Enable longer output to be displayed in the console
+
+options(max.print = 25000)
+
+# Save console output as .txt file
+
+sink(file = 'my_output.txt')
+
+# Save each image as .jpeg returned using the lat/lng values from bangkok_coordinates
+
+jpeg('D:\\LSE\\Capstone Project\\Bangkok GSV Images\\bangkok_image_%05d.jpeg', 
+     width = 8000, 
+     height = 5333)
+
+# Loop through 20,000 coordinate pairs to return images from Google Street View (commented out)
+
+# bangkok_coordinates_list <- purrr::map2(bangkok_coordinates$Lat, bangkok_coordinates$Lng, my_function)
+
+# Create the images
+
+dev.off()
+
+# Save console output
+
+sink()
+
+```
+
+**7. Tidying the Data**
+
+Now that the images are downloaded, we'll determine the proportion of the coordinates which successfully returned an image (as GSV coverage is not broad enough to cover every lat/lng pair in Bangkok).
+
+```{r}
+# The loop above was executed twice: first for 5,885 coordinates, and second for the remaining 14,117. Hence, I start by reading the initial 5,885 rows of bangkok_coordinates.csv.
+
+bangkok_coordinates_snippet <- read.csv('bangkok_coordinates.csv',
+                                        header = TRUE,
+                                        nrows = 5885)
+
+# txt_coordinates contains the console output after running bangkok_coordinates_list. This was created manually by pasting the console output into a text editor such as Atom.
+
+txt_coordinates <- read.delim('bangkok_coordinates_output')
+
+# Create txt_coordinates as df
+
+txt_coordinates_df <- as.data.frame(txt_coordinates)
+
+colnames(txt_coordinates_df) <- 'Data'
+
+# write.csv(txt_coordinates_df, 'txt_coordinates_df.csv', row.names = FALSE)
+
+txt_coordinates_csv <- read.csv('txt_coordinates_df.csv', header = TRUE)
+
+head(txt_coordinates_csv, 6) # Preview
+
+# Keep only every third line
+
+txt_coordinates_csv <- as.data.frame(txt_coordinates_csv[c(FALSE, FALSE, TRUE), ])
+
+colnames(txt_coordinates_csv) <- 'Data'
+
+# Remove stopwords
+
+library(stringr)
+
+coordinates_rm_stopwords <- as.data.frame(stringr::str_remove(txt_coordinates_csv$Data, '^.+location='))
+
+colnames(coordinates_rm_stopwords) <- 'Data'
+
+coordinates_rm_stopwords <- as.data.frame(stringr::str_remove(coordinates_rm_stopwords$Data, '&(.*)'))
+
+colnames(coordinates_rm_stopwords) <- 'Data'
+
+head(coordinates_rm_stopwords, 5)
+
+# Separate the lat/lng pairs into two columns
+
+suppressMessages(library(tidyverse))
+
+coordinates_separate_col <- coordinates_rm_stopwords %>% separate(Data,
+                                                                  into = c('Lat', 'Lng'),
+                                                                  sep = ',')
+
+# Remove final row which contains NA value
+
+coordinates_separate_col <- coordinates_separate_col[-nrow(coordinates_separate_col), ] 
+
+# Convert character class to numeric class
+
+coordinates_separate_col <- as.data.frame(lapply(coordinates_separate_col, 
+                                                 as.numeric))
+
+# Join overlapping coordinates within bangkok_coordinates_snippet and bangkok_separate_col. This will allow us to determine which coordinates within bangkok_coordinates_snippet successfully and unsuccessfully returned an image from GSV.
+
+join_coordinates <- dplyr::left_join(bangkok_coordinates_snippet, 
+                                     coordinates_separate_col, 
+                                     by = 'Lat')
+
+successful_coordinates <- join_coordinates %>% drop_na()
+
+# Label coordinates with their respective images, starting from bangkok_image_00002. This allows us to identify the location of each image according to their lat/lng coordinates.
+
+successful_coordinates$Lng.y <- sprintf('bangkok_image_%05d', seq_len(NROW(successful_coordinates)) + 1L)
+
+successful_coordinates <- successful_coordinates %>% rename(Lng = Lng.x, 
+                                                            Image_Name = Lng.y)
+
+head(successful_coordinates, 5) # Preview
+
+# Save
+
+# write.csv(successful_coordinates, 'bangkok_successful_coordinates.csv', row.names = FALSE)
+
+join_coordinates[is.na(join_coordinates)] <- 0 # Replace NAs with zeros
+  
+unsuccessful_coordinates <- filter(join_coordinates, Lng.y == 0) 
+
+# Label coordinates that unsuccessfully returned an image with zero
+
+unsuccessful_coordinates <- unsuccessful_coordinates %>% rename(Lng = Lng.x, 
+                                                                'Failure (0)' = Lng.y)
+
+head(unsuccessful_coordinates, 5) # Preview
+
+# Save
+
+# write.csv(unsuccessful_coordinates, 'bangkok_unsuccessful_coordinates.csv', row.names = FALSE)
+
+# Repeat tidying process for the remaining 14,117 coordinates, saved manually within bangkok_coordinates_2.csv 
+
+bangkok_coordinates_snippet_2 <- read.csv('bangkok_coordinates_2.csv',
+                                          header = TRUE)
+
+# txt_coordinates_2 contains the console output after running bangkok_coordinates_list. This was created manually by pasting the console output into a text editor such as Atom.
+
+txt_coordinates_2 <- read.delim('bangkok_coordinates_output_2')
+
+# Create txt_coordinates_2 as df
+
+txt_coordinates_df_2 <- as.data.frame(txt_coordinates_2)
+
+colnames(txt_coordinates_df_2) <- 'Data'
+
+# write.csv(txt_coordinates_df_2, 'txt_coordinates_df_2.csv', row.names = FALSE)
+
+txt_coordinates_csv_2 <- read.csv('txt_coordinates_df_2.csv', header = TRUE)
+
+head(txt_coordinates_csv_2, 6) # Preview
+
+# Keep only every third line
+
+txt_coordinates_csv_2 <- as.data.frame(txt_coordinates_csv_2[c(FALSE, FALSE, TRUE), ])
+
+colnames(txt_coordinates_csv_2) <- 'Data'
+
+# Remove stopwords
+
+coordinates_rm_stopwords_2 <- as.data.frame(stringr::str_remove(txt_coordinates_csv_2$Data, '^.+location='))
+
+colnames(coordinates_rm_stopwords_2) <- 'Data'
+
+coordinates_rm_stopwords_2 <- as.data.frame(stringr::str_remove(coordinates_rm_stopwords_2$Data, '&(.*)'))
+
+colnames(coordinates_rm_stopwords_2) <- 'Data'
+
+head(coordinates_rm_stopwords_2, 5)
+
+# Separate the lat/lng pairs into two columns
+
+coordinates_separate_col_2 <- coordinates_rm_stopwords_2 %>% separate(Data,
+                                                                      into = c('Lat', 'Lng'),
+                                                                      sep = ',')
+
+# Convert character class to numeric class
+
+coordinates_separate_col_2 <- as.data.frame(lapply(coordinates_separate_col_2,
+                                                   as.numeric))
+
+# Join overlapping coordinates within bangkok_coordinates_snippet_2 and bangkok_separate_col_2. This will allow us to determine which coordinates within bangkok_coordinates_snippet_2 successfully and unsuccessfully returned an image from GSV.
+
+join_coordinates_2 <- dplyr::left_join(bangkok_coordinates_snippet_2, 
+                                       coordinates_separate_col_2, 
+                                       by = 'Lat')
+
+successful_coordinates_2 <- join_coordinates_2 %>% drop_na()
+
+# Label coordinates with their respective images, starting from bangkok_image_00001. This allows us to identify the location of each image according to their lat/lng coordinates.
+
+successful_coordinates_2$Lng.y <- sprintf('bangkok_image_%05d', seq_len(NROW(successful_coordinates_2)))
+
+successful_coordinates_2 <- successful_coordinates_2 %>% rename(Lng = Lng.x, 
+                                                                Image_Name = Lng.y)
+
+head(successful_coordinates_2, 5) # Preview
+
+# Save
+
+# write.csv(successful_coordinates_2, 'bangkok_successful_coordinates_2.csv', row.names = FALSE)
+
+```
+
+
+
